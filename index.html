@@ -236,13 +236,36 @@ let voice=null;
 function pickVoice(){if(!window.speechSynthesis)return;const v=speechSynthesis.getVoices();
  voice=v.find(x=>/Samantha|Karen|Moira|Google US English|Serena/i.test(x.name))||v.find(x=>/^en[-_](US|GB)/i.test(x.lang))||v.find(x=>/^en/i.test(x.lang))||null}
 if(window.speechSynthesis){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
-function say(t){if(ST.muted||!window.speechSynthesis)return;try{
+function ttsSay(t){if(ST.muted||!window.speechSynthesis)return;try{
  const ss=speechSynthesis;if(!voice)pickVoice();
  const go=()=>{const u=new SpeechSynthesisUtterance(t);u.lang=voice?voice.lang:"en-US";if(voice)u.voice=voice;u.rate=ST.rate;u.pitch=1.3;u.volume=1;
   u.onerror=()=>{try{const u2=new SpeechSynthesisUtterance(t);u2.lang="en-US";u2.rate=ST.rate;ss.speak(u2)}catch(e){}};
   ss.speak(u);if(ss.paused)ss.resume()};
  if(ss.speaking||ss.pending)ss.cancel();go();
 }catch(e){}}
+// ---------- recorded voice clips ----------
+let CLIP=null,CLIPMAX=1;
+try{fetch("audio/manifest.json").then(r=>r.ok?r.json():null).then(j=>{if(j){CLIP=j;for(const k in j)CLIPMAX=Math.max(CLIPMAX,k.split(" ").length)}}).catch(()=>{})}catch(e){}
+const TENW=["","","twenty","thirty","forty","fifty","sixty","seventy","eighty","ninety"];
+const n2w=n=>{n=+n;if(n<=20)return NUMW[n];if(n<100)return TENW[n/10|0]+(n%10?" "+NUMW[n%10]:"");return String(n)};
+const nrm=t=>t.toLowerCase().replace(/\b(\d+)\b/g,(m,d)=>n2w(d)).replace(/[^a-z0-9' -]/g," ").replace(/\s+/g," ").trim();
+function clipsFor(t){if(!CLIP)return null;const out=[];
+ for(const part of String(t).split(/[.!?,]+/)){const k=nrm(part);if(!k)continue;if(CLIP[k]){out.push(CLIP[k]);continue}
+  const w=k.split(" ");let i=0;while(i<w.length){let n=Math.min(CLIPMAX,w.length-i),hit=null;for(;n>0;n--){const s=w.slice(i,i+n).join(" ");if(CLIP[s]){hit=CLIP[s];break}}
+   if(!hit)return null;out.push(hit);i+=n}}
+ return out}
+const VO=new Audio();VO.setAttribute("playsinline","");VO.setAttribute("webkit-playsinline","");VO.preload="auto";
+let VQ=[],VOK=true;
+function voNext(){if(ST.muted||!VQ.length)return;const s=VQ.shift();VO.src="audio/"+s+".mp3";VO.playbackRate=ST.rate<0.75?0.85:1;
+ const pr=VO.play();if(pr&&pr.catch)pr.catch(()=>{VQ=[]})}
+VO.addEventListener("ended",voNext);VO.addEventListener("error",()=>{voNext()});
+function stopVoice(){VQ=[];try{VO.pause()}catch(e){}if(window.speechSynthesis)try{speechSynthesis.cancel()}catch(e){}}
+function say(t){if(ST.muted||!t)return;const c=clipsFor(t);
+ if(!c){ttsSay(t);return}
+ if(window.speechSynthesis&&(speechSynthesis.speaking||speechSynthesis.pending))try{speechSynthesis.cancel()}catch(e){}
+ VQ=c.slice();try{VO.pause()}catch(e){}voNext()}
+const PRE=new Set();
+function preload(t){const c=clipsFor(t);if(!c)return;c.forEach(s=>{if(PRE.has(s))return;PRE.add(s);try{fetch("audio/"+s+".mp3").catch(()=>{})}catch(e){}})}
 // keep Chrome speech engine alive
 const IOS=/iP(hone|ad|od)/.test(navigator.userAgent)||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 setInterval(()=>{if(!IOS&&window.speechSynthesis&&speechSynthesis.speaking&&!speechSynthesis.paused){speechSynthesis.pause();speechSynthesis.resume()}},10000);
@@ -259,7 +282,7 @@ function silentWav(){const sr=8000,n=800,b=new ArrayBuffer(44+n),v=new DataView(
  return URL.createObjectURL(new Blob([b],{type:"audio/wav"}))}
 function playSilentEl(){try{if(!SILENT_EL){SILENT_EL=new Audio(silentWav());SILENT_EL.loop=true;SILENT_EL.setAttribute("playsinline","");SILENT_EL.volume=0.01}const pr=SILENT_EL.play();if(pr&&pr.catch)pr.catch(()=>{})}catch(e){}}
 
-function unlockAudio(){playSilentEl();const a=ac();if(a){try{const b=a.createBuffer(1,1,22050),src=a.createBufferSource();src.buffer=b;src.connect(a.destination);src.start(0)}catch(e){}}
+function unlockAudio(){playSilentEl();if(!UNLOCKED){try{VO.src=silentWav();VO.muted=true;const pr=VO.play();const um=()=>{VO.muted=false};if(pr&&pr.then)pr.then(um,um);else um()}catch(e){VO.muted=false}}const a=ac();if(a){try{const b=a.createBuffer(1,1,22050),src=a.createBufferSource();src.buffer=b;src.connect(a.destination);src.start(0)}catch(e){}}
  if(!UNLOCKED&&window.speechSynthesis){pickVoice()}
  UNLOCKED=true}
 ["pointerdown","touchstart","mousedown","keydown","click"].forEach(ev=>document.addEventListener(ev,unlockAudio,{capture:true,passive:true}));
@@ -324,6 +347,7 @@ function ask(phrase,icon,opts,cls,{onCorrect=null,wrong=o=>o.word?"That's "+o.wo
  ST.ans=phrase;$("#prompt").textContent="🔊 "+(icon||"");ST.onCorrect=onCorrect;
  const st=$("#stage");st.innerHTML="";if(pre)st.appendChild(pre);const c=document.createElement("div");c.className="choices";st.appendChild(c);
  if(!cls)cls=opts.length>=6?"c6":opts.length===4||opts.length===5?"c4":"";
+ preload(phrase);opts.forEach(o=>{if(o.ok)preload("Yes! "+(praise||o.word)+"!");else preload(wrong(o))});
  opts.forEach(o=>{const b=document.createElement("button");b.className="card "+cls;b.innerHTML=o.html;
   b.onclick=()=>{if(ST.locked)return;if(o.ok){answer(b,praise||o.word)}else{wob(b);boop();say(wrong(o));ST.streak=0}};c.appendChild(b)});
  say(phrase)}
@@ -435,7 +459,7 @@ function qAbcCards(){const lh=l=>'<span class="letter">'+l+'</span>';
  ask("Which one starts with "+PH[tg]+"? "+PH[tg]+"!",tg,opts,"",{praise:PH[tg]+", "+PH[tg]+", "+w[1]})}
 
 // ---------- parent menu ----------
-$("#muteBtn").onclick=()=>{ST.muted=!ST.muted;$("#muteBtn").textContent=ST.muted?"🔇":"🔊";if(ST.muted&&window.speechSynthesis)speechSynthesis.cancel()};
+$("#muteBtn").onclick=()=>{ST.muted=!ST.muted;$("#muteBtn").textContent=ST.muted?"🔇":"🔊";if(ST.muted)stopVoice()};
 $("#gearBtn").onclick=()=>{$("#parent").classList.add("on");renderMenu()};
 $("#closeP").onclick=()=>$("#parent").classList.remove("on");
 $("#resetSt").onclick=()=>{if(confirm("Reset all stickers and levels?")){save={total:0,stickers:0,lv:{listen:1,colour:1,count:1,abc:1},autoCount:true};persist();renderStick();renderMenu()}};
