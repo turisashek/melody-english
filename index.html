@@ -250,7 +250,15 @@ setInterval(()=>{if(window.speechSynthesis&&speechSynthesis.speaking&&!speechSyn
 let AC=null;
 function ac(){if(!AC){const C=window.AudioContext||window.webkitAudioContext;if(C)AC=new C()}if(AC&&AC.state!=="running"){try{AC.resume()}catch(e){}}return AC}
 let UNLOCKED=false;
-function unlockAudio(){const a=ac();if(a){try{const b=a.createBuffer(1,1,22050),src=a.createBufferSource();src.buffer=b;src.connect(a.destination);src.start(0)}catch(e){}}
+// iOS: route Web Audio as media playback so the ring/silent switch doesn't mute it
+try{if(navigator.audioSession)navigator.audioSession.type="playback"}catch(e){}
+let SILENT_EL=null;
+function silentWav(){const sr=8000,n=800,b=new ArrayBuffer(44+n),v=new DataView(b);const w=(o,t)=>{for(let i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i))};
+ w(0,"RIFF");v.setUint32(4,36+n,true);w(8,"WAVE");w(12,"fmt ");v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,sr,true);v.setUint32(28,sr,true);v.setUint16(32,1,true);v.setUint16(34,8,true);w(36,"data");v.setUint32(40,n,true);for(let i=0;i<n;i++)v.setUint8(44+i,128);
+ return URL.createObjectURL(new Blob([b],{type:"audio/wav"}))}
+function playSilentEl(){try{if(!SILENT_EL){SILENT_EL=new Audio(silentWav());SILENT_EL.loop=true;SILENT_EL.setAttribute("playsinline","");SILENT_EL.volume=0.01}const pr=SILENT_EL.play();if(pr&&pr.catch)pr.catch(()=>{})}catch(e){}}
+
+function unlockAudio(){playSilentEl();const a=ac();if(a){try{const b=a.createBuffer(1,1,22050),src=a.createBufferSource();src.buffer=b;src.connect(a.destination);src.start(0)}catch(e){}}
  if(!UNLOCKED&&window.speechSynthesis){try{const u=new SpeechSynthesisUtterance(" ");u.volume=0;speechSynthesis.speak(u)}catch(e){}pickVoice()}
  UNLOCKED=true}
 ["pointerdown","touchstart","mousedown","keydown","click"].forEach(ev=>document.addEventListener(ev,unlockAudio,{capture:true,passive:true}));
